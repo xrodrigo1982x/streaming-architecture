@@ -82,6 +82,14 @@ function initialize() {
                         scale: 4
                     }
                 });
+
+                var marker = this.cars[event.carId]
+                marker.timeout = function(){
+                    setTimeout(function(){ 
+                        marker.setMap(null)
+                    }, 5000);
+                }
+                marker.timeout()
             }
         }
     });
