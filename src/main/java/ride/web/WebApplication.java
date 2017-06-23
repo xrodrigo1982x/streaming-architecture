@@ -2,7 +2,6 @@ package ride.web;
 
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KStreamBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
@@ -13,7 +12,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.socket.config.annotation.AbstractWebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
-import ride.model.CarAreaEvent;
 import ride.stream.util.Get;
 import ride.util.CarAreaEventSerDes;
 
@@ -25,6 +23,9 @@ import static ride.stream.Topics.CARS_AVAILABLE_IN_AREA;
 @Controller
 @SpringBootApplication
 public class WebApplication extends AbstractWebSocketMessageBrokerConfigurer {
+
+    public static final CarAreaEventSerDes CARAREA_EVENT_SER_DES = new CarAreaEventSerDes();
+    public static final KStreamBuilder STREAM_BUILDER = new KStreamBuilder();
 
     public static void main(String[] args) {
         SpringApplication.run(WebApplication.class);
@@ -47,13 +48,14 @@ public class WebApplication extends AbstractWebSocketMessageBrokerConfigurer {
 
     @PostConstruct
     public void init() {
-        CarAreaEventSerDes carareaEventSerDes = new CarAreaEventSerDes();
-        KStreamBuilder streamBuilder = new KStreamBuilder();
-        KStream<String, CarAreaEvent> stream = streamBuilder.stream(Serdes.String(), Serdes.serdeFrom(carareaEventSerDes, carareaEventSerDes), CARS_AVAILABLE_IN_AREA);
+        STREAM_BUILDER.stream(Serdes.String(), Serdes.serdeFrom(CARAREA_EVENT_SER_DES, CARAREA_EVENT_SER_DES), CARS_AVAILABLE_IN_AREA)
+                .foreach((k, v) -> sendingOperations.convertAndSend("/topic/car-area-user-" + v.getUserId(), v));
 
-        stream.foreach((k, v) -> sendingOperations.convertAndSend("/topic/car-area-user-" + v.getUserId(), v));
+        startStream();
+    }
 
-        KafkaStreams kafkaStreams = new KafkaStreams(streamBuilder, Get.kafkaProperties("car-area-user"));
+    private void startStream() {
+        KafkaStreams kafkaStreams = new KafkaStreams(STREAM_BUILDER, Get.kafkaProperties("car-area-user"));
         kafkaStreams.start();
     }
 

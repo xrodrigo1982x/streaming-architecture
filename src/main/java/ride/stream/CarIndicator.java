@@ -27,38 +27,40 @@ import static ride.stream.Topics.CAR_CURRENT_LOCATION;
 public class CarIndicator {
 
     private static KafkaProducer<String, CarAreaEvent> producer = new KafkaProducer<>(Get.kafkaProperties("cars-in-area"), new StringSerializer(), new CarAreaEventSerDes());
+    public static final Elasticsearch ES = Feign.builder().target(Elasticsearch.class, "http://10.30.0.40:9200");
+    public static final ObjectMapper OM = new ObjectMapper();
+    public static final KStreamBuilder STREAM_BUILDER = new KStreamBuilder();
 
     public static void main(String[] args) throws Exception {
-        CarLocationEventSerDes carLocationEventSerDes = new CarLocationEventSerDes();
-        KStreamBuilder streamBuilder = new KStreamBuilder();
-        KStream<String, CarLocationEvent> stream = streamBuilder.stream(Serdes.String(), Serdes.serdeFrom(carLocationEventSerDes, carLocationEventSerDes), CAR_CURRENT_LOCATION);
-
-        //"10.30.0.40"
-
-        Elasticsearch es = Feign.builder().target(Elasticsearch.class, "http://10.30.0.40:9200");
-        ObjectMapper om = new ObjectMapper();
-
-        stream.filter((k, v) -> v.isAvailable()).foreach((k, v) -> {
+        createStream(STREAM_BUILDER).filter((key, carLocation) -> carLocation.isAvailable()).foreach((key, carLocation) -> {
             try {
-                String m = es.search(v.getCarId(), v.getLocation().getLatitude(), v.getLocation().getLongitude());
-                Map response = om.readValue(m, HashMap.class);
-                List<Map> users = (List<Map>) ((Map) response.get("hits")).get("hits");
-                users.forEach(user -> {
-                    CarAreaEvent id = CarAreaEvent.builder()
+                String searchResult = ES.search(carLocation.getCarId(), carLocation.getLocation().getLatitude(), carLocation.getLocation().getLongitude());
+
+                ((List<Map>) ((Map) OM.readValue(searchResult, HashMap.class).get("hits")).get("hits")).forEach(user -> {
+                    CarAreaEvent carEvent = CarAreaEvent.builder()
                             .userId((String) user.get("_id"))
-                            .location(v.getLocation())
-                            .timestamp(v.getTimestamp())
-                            .carId(v.getCarId())
+                            .location(carLocation.getLocation())
+                            .timestamp(carLocation.getTimestamp())
+                            .carId(carLocation.getCarId())
                             .build();
-                    producer.send(new ProducerRecord<>(CARS_AVAILABLE_IN_AREA, id));
+                    producer.send(new ProducerRecord<>(CARS_AVAILABLE_IN_AREA, carEvent));
                 });
             } catch (IOException e) {
                 System.out.println(e.getMessage());
             }
         });
 
+        startStream(STREAM_BUILDER);
+    }
+
+    private static void startStream(KStreamBuilder streamBuilder) {
         KafkaStreams kafkaStreams = new KafkaStreams(streamBuilder, Get.kafkaProperties("car-indicator"));
         kafkaStreams.start();
+    }
+
+    private static KStream<String, CarLocationEvent> createStream(KStreamBuilder streamBuilder) {
+        CarLocationEventSerDes carLocationEventSerDes = new CarLocationEventSerDes();
+        return streamBuilder.stream(Serdes.String(), Serdes.serdeFrom(carLocationEventSerDes, carLocationEventSerDes), CAR_CURRENT_LOCATION);
     }
 
 }
